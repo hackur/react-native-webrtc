@@ -14,9 +14,40 @@
 #import "WebRTCModule.h"
 
 /**
+ * In the fashion of
+ * https://www.w3.org/TR/html5/embedded-content-0.html#dom-video-videowidth
+ * and https://www.w3.org/TR/html5/rendering.html#video-object-fit, resembles
+ * the CSS style object-fit.
+ */
+typedef NS_ENUM(NSInteger, RTCVideoViewObjectFit) {
+  /**
+   * The contain value defined by https://www.w3.org/TR/css3-images/#object-fit:
+   *
+   * The replaced content is sized to maintain its aspect ratio while fitting
+   * within the element's content box.
+   */
+  RTCVideoViewObjectFitContain,
+  /**
+   * The contain value defined by https://www.w3.org/TR/css3-images/#object-fit:
+   *
+   * The replaced content is sized to maintain its aspect ratio while filling
+   * the element's entire content box.
+   */
+  RTCVideoViewObjectFitCover
+};
+
+/**
  * Implements an equivalent of HTMLVideoElement i.e. Web's video element.
  */
 @interface RTCVideoView : UIView <RTCVideoRenderer, RTCEAGLVideoViewDelegate>
+
+/**
+ * In the fashion of
+ * https://www.w3.org/TR/html5/embedded-content-0.html#dom-video-videowidth
+ * and https://www.w3.org/TR/html5/rendering.html#video-object-fit, resembles
+ * the CSS style object-fit.
+ */
+@property (nonatomic) RTCVideoViewObjectFit objectFit;
 
 @end
 
@@ -31,6 +62,14 @@
    * The width and height of the video (frames) rendered by {@link #_subview}.
    */
   CGSize _videoSize;
+}
+
+- (void)dispatchAsyncSetNeedsLayout {
+  __weak UIView *weakSelf = self;
+  dispatch_async(dispatch_get_main_queue(), ^{
+    UIView *strongSelf = weakSelf;
+    [strongSelf setNeedsLayout];
+  });
 }
 
 /**
@@ -67,7 +106,22 @@
     newValue.origin.y = 0;
     newValue.size.width = 0;
     newValue.size.height = 0;
-  } else {
+  } else if (RTCVideoViewObjectFitCover == self.objectFit) { // cover
+    newValue = self.bounds;
+    // Is there a real need to scale _subview?
+    if (newValue.size.width != width || newValue.size.height != height) {
+      CGFloat scaleFactor
+        = MAX(newValue.size.width / width, newValue.size.height / height);
+      // Scale both width and height in order to make it obvious that the aspect
+      // ratio is preserved.
+      width *= scaleFactor;
+      height *= scaleFactor;
+      newValue.origin.x += (newValue.size.width - width) / 2.0;
+      newValue.origin.y += (newValue.size.height - height) / 2.0;
+      newValue.size.width = width;
+      newValue.size.height = height;
+    }
+  } else { // contain
     // The implementaiton is in accord with
     // https://www.w3.org/TR/html5/embedded-content-0.html#the-video-element:
     //
@@ -91,6 +145,19 @@
       || newValue.size.width != oldValue.size.width
       || newValue.size.height != oldValue.size.height) {
     _subview.frame = newValue;
+  }
+}
+
+/**
+ * Implements the setter of the objectFit property of this RTCVideoView.
+ *
+ * @param objectFit the value to set on the objectFit property of this
+* RTCVideoView
+ */
+- (void)setObjectFit:(RTCVideoViewObjectFit)objectFit {
+  if (_objectFit != objectFit) {
+      _objectFit = objectFit;
+      [self dispatchAsyncSetNeedsLayout];
   }
 }
 
@@ -129,12 +196,7 @@
 - (void)videoView:(RTCEAGLVideoView *)videoView didChangeVideoSize:(CGSize)size {
   if (videoView == _subview) {
     _videoSize = size;
-
-    __weak UIView *weakSelf = self;
-    dispatch_async(dispatch_get_main_queue(), ^{
-      UIView *strongSelf = weakSelf;
-      [strongSelf setNeedsLayout];
-    });
+    [self dispatchAsyncSetNeedsLayout];
   }
 }
 
@@ -170,6 +232,22 @@ RCT_EXPORT_MODULE()
 
 - (dispatch_queue_t)methodQueue {
   return dispatch_get_main_queue();
+}
+
+/**
+ * In the fashion of
+ * https://www.w3.org/TR/html5/embedded-content-0.html#dom-video-videowidth
+ * and https://www.w3.org/TR/html5/rendering.html#video-object-fit, resembles
+ * the CSS style object-fit.
+ */
+RCT_CUSTOM_VIEW_PROPERTY(objectFit, NSString *, RTCVideoView) {
+  NSString *s = [RCTConvert NSString:json];
+  RTCVideoViewObjectFit e
+    = (s && [s isEqualToString:@"cover"])
+      ? RTCVideoViewObjectFitCover
+      : RTCVideoViewObjectFitContain;
+
+  view.objectFit = e;
 }
 
 RCT_CUSTOM_VIEW_PROPERTY(streamURL, NSNumber, RTCVideoView) {
