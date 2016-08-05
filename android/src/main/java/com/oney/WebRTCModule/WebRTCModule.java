@@ -194,6 +194,11 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
             }
 
             @Override
+            public void onIceCandidatesRemoved(final IceCandidate[] candidates) {
+                Log.d(TAG, "onIceCandidatesRemoved");
+            }
+
+            @Override
             public void onAddStream(MediaStream mediaStream) {
                 mMediaStreamId++;
                 mMediaStreams.put(mMediaStreamId, mediaStream);
@@ -288,6 +293,8 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
                   return;
                 }
 
+                dataChannel.registerObserver(new DataChannelObserver(dataChannelId, dataChannel));
+
                 WritableMap dataChannelParams = Arguments.createMap();
                 dataChannelParams.putInt("id", dataChannelId);
                 dataChannelParams.putString("label", dataChannel.label());
@@ -329,12 +336,7 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
                     if (useVideo) {
                         String name = CameraEnumerationAndroid.getNameOfFrontFacingDevice();
 
-                        VideoCapturerAndroid v = VideoCapturerAndroid.create(name, new VideoCapturerAndroid.CameraErrorHandler() {
-                            @Override
-                            public void onCameraError(String s) {
-
-                            }
-                        });
+                        VideoCapturerAndroid v = VideoCapturerAndroid.create(name, new CameraEventsHandler());
                         videoSource = mFactory.createVideoSource(v, videoConstraints);
                     }
                     break;
@@ -443,7 +445,6 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
             return;
         }
         track.setEnabled(false);
-        track.setState(MediaStreamTrack.State.ENDED);
         mMediaStreamTracks.remove(trackId);
         // what exaclty `detached` means in doc?
         // see: https://www.w3.org/TR/mediacapture-streams/#track-detached
@@ -478,7 +479,6 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
             return;
         }
         track.setEnabled(false); // should we do this?
-        track.setState(MediaStreamTrack.State.ENDED); // should we do this?
         mMediaStreamTracks.remove(trackId);
         if (track.kind().equals("audio")) {
             stream.removeTrack((AudioTrack)track);
@@ -512,12 +512,7 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
             name = CameraEnumerationAndroid.getNameOfFrontFacingDevice();
         }
 
-        return VideoCapturerAndroid.create(name, new VideoCapturerAndroid.CameraErrorHandler() {
-            @Override
-            public void onCameraError(String s) {
-
-            }
-        });
+        return VideoCapturerAndroid.create(name, new CameraEventsHandler());
     }
     private MediaConstraints defaultConstraints() {
         MediaConstraints constraints = new MediaConstraints();
@@ -830,6 +825,7 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
             // reported issues of breakages).
             int dataChannelId = init.id;
             if (-1 != dataChannelId) {
+                dataChannel.registerObserver(new DataChannelObserver(dataChannelId, dataChannel));
                 mDataChannels.put(dataChannelId, dataChannel);
             }
         } else {
@@ -940,4 +936,95 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
         }
         return null;
     }
+
+    class DataChannelObserver implements DataChannel.Observer {
+
+        private final int mId;
+        private final DataChannel mDataChannel;
+
+        DataChannelObserver(int id, DataChannel dataChannel) {
+            mId = id;
+            mDataChannel = dataChannel;
+        }
+
+        @Override
+        public void onBufferedAmountChange(long amount) {
+        }
+
+        @Override
+        public void onStateChange() {
+            WritableMap params = Arguments.createMap();
+            params.putInt("id", mId);
+            params.putString("state", dataChannelStateString(mDataChannel.state()));
+            sendEvent("dataChannelStateChanged", params);
+        }
+
+        @Override
+        public void onMessage(DataChannel.Buffer buffer) {
+            WritableMap params = Arguments.createMap();
+            params.putInt("id", mId);
+
+            byte[] bytes;
+            if (buffer.data.hasArray()) {
+                bytes = buffer.data.array();
+            } else {
+                bytes = new byte[buffer.data.remaining()];
+                buffer.data.get(bytes);
+            }
+
+            if (buffer.binary) {
+                params.putString("type", "binary");
+                params.putString("data", Base64.encodeToString(bytes, Base64.NO_WRAP));
+            } else {
+                params.putString("type", "text");
+                params.putString("data", new String(bytes, Charset.forName("UTF-8")));
+            }
+
+            sendEvent("dataChannelReceiveMessage", params);
+        }
+    }
+
+    static class CameraEventsHandler implements VideoCapturerAndroid.CameraEventsHandler {
+        // Camera error handler - invoked when camera can not be opened
+        // or any camera exception happens on camera thread.
+        @Override
+        public void onCameraError(String errorDescription) {
+            Log.d(TAG, String.format("CameraEventsHandler.onCameraError: errorDescription=%s", errorDescription));
+        }
+
+        // Invoked when camera stops receiving frames
+        @Override
+        public void onCameraFreezed(String errorDescription) {
+            Log.d(TAG, String.format("CameraEventsHandler.onCameraFreezed: errorDescription=%s", errorDescription));
+        }
+
+        // Callback invoked when camera is opening.
+        @Override
+        public void onCameraOpening(int cameraId) {
+            Log.d(TAG, String.format("CameraEventsHandler.onCameraOpening: cameraId=%s", cameraId));
+        }
+
+        // Callback invoked when first camera frame is available after camera is opened.
+        @Override
+        public void onFirstFrameAvailable() {
+            Log.d(TAG, "CameraEventsHandler.onFirstFrameAvailable");
+        }
+
+        // Callback invoked when camera closed.
+        @Override
+        public void onCameraClosed() {
+            Log.d(TAG, "CameraEventsHandler.onFirstFrameAvailable");
+        }
+    }
+
+    /*
+    // Camera switch handler - one of these functions are invoked with the result of switchCamera().
+    // The callback may be called on an arbitrary thread.
+    static interface CameraSwitchHandler {
+        // Invoked on success. |isFrontCamera| is true if the new camera is front facing.
+        void onCameraSwitchDone(boolean isFrontCamera);
+        // Invoked on failure, e.g. camera is stopped or only one camera available.
+        void onCameraSwitchError(String errorDescription);
+    }
+    */
 }

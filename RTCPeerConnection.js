@@ -1,21 +1,19 @@
 'use strict';
 
-import EventTarget from 'event-target-shim'
-import {
-  DeviceEventEmitter,
-  NativeModules,
-} from 'react-native';
-const WebRTCModule = NativeModules.WebRTCModule;
+import EventTarget from 'event-target-shim';
+import {DeviceEventEmitter, NativeModules} from 'react-native';
 
-import MediaStream from './MediaStream'
-import MediaStreamEvent from './MediaStreamEvent'
-import MediaStreamTrack from './MediaStreamTrack'
-import RTCDataChannel from './RTCDataChannel'
-import RTCDataChannelEvent from './RTCDataChannelEvent'
-import RTCSessionDescription from './RTCSessionDescription'
-import RTCIceCandidate from './RTCIceCandidate'
-import RTCIceCandidateEvent from './RTCIceCandidateEvent'
-import RTCEvent from './RTCEvent'
+import MediaStream from './MediaStream';
+import MediaStreamEvent from './MediaStreamEvent';
+import MediaStreamTrack from './MediaStreamTrack';
+import RTCDataChannel from './RTCDataChannel';
+import RTCDataChannelEvent from './RTCDataChannelEvent';
+import RTCSessionDescription from './RTCSessionDescription';
+import RTCIceCandidate from './RTCIceCandidate';
+import RTCIceCandidateEvent from './RTCIceCandidateEvent';
+import RTCEvent from './RTCEvent';
+
+const {WebRTCModule} = NativeModules;
 
 type RTCSignalingState =
   'stable' |
@@ -56,7 +54,7 @@ const PEER_CONNECTION_EVENTS = [
 
 let nextPeerConnectionId = 0;
 
-class RTCPeerConnection extends EventTarget(PEER_CONNECTION_EVENTS) {
+export default class RTCPeerConnection extends EventTarget(PEER_CONNECTION_EVENTS) {
   localDescription: RTCSessionDescription;
   remoteDescription: RTCSessionDescription;
 
@@ -236,6 +234,11 @@ class RTCPeerConnection extends EventTarget(PEER_CONNECTION_EVENTS) {
           return;
         }
         this.iceGatheringState = ev.iceGatheringState;
+
+        if (this.iceGatheringState === 'complete') {
+          this.dispatchEvent(new RTCIceCandidateEvent('icecandidate', null));
+        }
+
         this.dispatchEvent(new RTCEvent('icegatheringstatechange'));
       }),
       DeviceEventEmitter.addListener('peerConnectionDidOpenDataChannel', ev => {
@@ -282,7 +285,7 @@ class RTCPeerConnection extends EventTarget(PEER_CONNECTION_EVENTS) {
       if (typeof id !== 'number') {
         throw new TypeError('DataChannel id must be a number: ' + id);
       }
-      if (dataChannelIds.contains(id)) {
+      if (dataChannelIds.has(id)) {
         throw new ResourceInUse('DataChannel id already in use: ' + id);
       }
     } else {
@@ -295,7 +298,7 @@ class RTCPeerConnection extends EventTarget(PEER_CONNECTION_EVENTS) {
       // is reserved due to SCTP INIT and INIT-ACK chunks only allowing a
       // maximum of 65535 streams to be negotiated (as defined by the WebRTC
       // Data Channel Establishment Protocol).
-      for (id = 0; id < 65535 && dataChannelIds.contains(id); ++id);
+      for (id = 0; id < 65535 && dataChannelIds.has(id); ++id);
       // TODO Throw an error if no unused id is available.
       dataChannelDict = Object.assign({id}, dataChannelDict);
     }
@@ -307,5 +310,3 @@ class RTCPeerConnection extends EventTarget(PEER_CONNECTION_EVENTS) {
     return new RTCDataChannel(label, dataChannelDict);
   }
 }
-
-module.exports = RTCPeerConnection;
